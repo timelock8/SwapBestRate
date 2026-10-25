@@ -62,6 +62,14 @@ td.r,th.r{text-align:right}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.0/dist/umd/supabase.js"></script>
 </head>
 <body>
+<div id="annModal" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px">
+  <div class="card" style="width:min(420px,100%)">
+    <h2>Announcement</h2>
+    <h3 id="annTitle" style="margin:0 0 8px"></h3>
+    <div id="annBody" style="white-space:pre-wrap;margin-bottom:14px"></div>
+    <button id="annOk">Got it</button>
+  </div>
+</div>
 <div id="authGate" class="card" style="position:fixed;inset:0;margin:auto;width:min(380px,calc(100% - 32px));height:fit-content;z-index:999">
   <h2 id="authTitle">Sign in</h2>
   <div class="controls" style="flex-direction:column;align-items:stretch">
@@ -1141,6 +1149,7 @@ refresh();
     gate.hidden = true;
     header.hidden = false;
     main.hidden = false;
+    checkAnnouncements();
     if (!document.getElementById("signOutBtn")) {
       const b = document.createElement("button");
       b.id = "signOutBtn";
@@ -1191,6 +1200,46 @@ refresh();
       setMsg("Account created. Check your email to confirm, then sign in.");
     }
   });
+
+  async function checkAnnouncements(){
+    try {
+      const { data: userData } = await sb.auth.getUser();
+      const user = userData && userData.user;
+      if (!user) return;
+      const { data: anns } = await sb.from("announcements")
+        .select("id,title,body,created_at")
+        .eq("active", true)
+        .order("created_at", { ascending: true });
+      if (!anns || !anns.length) return;
+      const { data: reads } = await sb.from("announcement_reads")
+        .select("announcement_id")
+        .eq("user_id", user.id);
+      const seen = new Set((reads || []).map(r => r.announcement_id));
+      const unread = anns.filter(a => !seen.has(a.id));
+      if (unread.length) showAnnouncements(unread, user.id);
+    } catch (e) { /* announcements must never block the app */ }
+  }
+
+  function showAnnouncements(list, userId){
+    let i = 0;
+    const box = document.getElementById("annModal");
+    const titleEl = document.getElementById("annTitle");
+    const bodyEl = document.getElementById("annBody");
+    const okBtn = document.getElementById("annOk");
+    const show = () => {
+      titleEl.textContent = list[i].title;
+      bodyEl.textContent = list[i].body;
+      box.hidden = false;
+    };
+    okBtn.onclick = async () => {
+      try {
+        await sb.from("announcement_reads").insert({ user_id: userId, announcement_id: list[i].id });
+      } catch (e) { /* ignore */ }
+      i++;
+      if (i < list.length) show(); else box.hidden = true;
+    };
+    show();
+  }
 
   (async () => {
     try {
