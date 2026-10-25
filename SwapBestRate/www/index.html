@@ -42,6 +42,7 @@ td.r,th.r{text-align:right}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media (max-width:900px){.grid2{grid-template-columns:1fr}}
 /* Mobile improvements */
+[hidden]{display:none !important}
 @media (max-width: 600px) {
   header { padding: 14px; }
   header h1 { font-size: 18px; }
@@ -58,8 +59,20 @@ td.r,th.r{text-align:right}
   .scroll { -webkit-overflow-scrolling: touch; }
 }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.0/dist/umd/supabase.js"></script>
 </head>
 <body>
+<div id="authGate" class="card" style="position:fixed;inset:0;margin:auto;width:min(380px,calc(100% - 32px));height:fit-content;z-index:999">
+  <h2 id="authTitle">Sign in</h2>
+  <div class="controls" style="flex-direction:column;align-items:stretch">
+    <label>Email <input id="authEmail" type="email" autocomplete="email"></label>
+    <label>Password <input id="authPass" type="password" autocomplete="current-password"></label>
+    <button id="authSignIn">Sign in</button>
+    <button class="ghost" id="authSignUp">Create account</button>
+    <div class="note" id="authMsg"></div>
+  </div>
+</div>
+
 <header>
   <h1>Swap Best Rate</h1>
   <div class="sub">Enter rates from up to 9 LPs per symbol. The app selects the best bid and ask and applies your client markup.</div>
@@ -1100,6 +1113,95 @@ renderLpNames();
 renderLpSelect();
 renderInputs();
 refresh();
+</script>
+<script>
+(function(){
+  // ===== BACKEND SETTINGS: paste your Supabase values here =====
+  const SUPABASE_URL = "https://wlyucxmvvpplztdyfhat.supabase.co";
+  const SUPABASE_ANON_KEY = "sb_publishable_hgEoz9Kc1LN08u3MHyoRew_jiYfzNqy";
+  // =============================================================
+
+  const gate = document.getElementById("authGate");
+  const header = document.querySelector("header");
+  const main = document.querySelector("main");
+  const msg = document.getElementById("authMsg");
+  const setMsg = t => { msg.textContent = t; };
+  header.hidden = true;
+  main.hidden = true;
+
+  let sb = null;
+  try {
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  } catch (e) {
+    setMsg("Could not connect to the backend. Check the settings.");
+    return;
+  }
+
+  function showApp(){
+    gate.hidden = true;
+    header.hidden = false;
+    main.hidden = false;
+    if (!document.getElementById("signOutBtn")) {
+      const b = document.createElement("button");
+      b.id = "signOutBtn";
+      b.className = "ghost";
+      b.textContent = "Sign out";
+      b.addEventListener("click", async () => {
+        try { await sb.auth.signOut(); } catch (e) {}
+        location.reload();
+      });
+      header.querySelector("div").appendChild(b);
+    }
+  }
+
+  async function recordLogin(user, eventName){
+    try {
+      await sb.from("login_events").insert({
+        user_id: user.id,
+        email: user.email,
+        event: eventName,
+        device: (navigator.userAgent || "").slice(0, 300)
+      });
+    } catch (e) { /* logging should never block the app */ }
+  }
+
+  document.getElementById("authSignIn").addEventListener("click", async () => {
+    const email = document.getElementById("authEmail").value.trim();
+    const password = document.getElementById("authPass").value;
+    if (!email || !password) { setMsg("Enter your email and password."); return; }
+    setMsg("Signing in...");
+    const { data, error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) { setMsg(error.message); return; }
+    await recordLogin(data.user, "login");
+    showApp();
+  });
+
+  document.getElementById("authSignUp").addEventListener("click", async () => {
+    const email = document.getElementById("authEmail").value.trim();
+    const password = document.getElementById("authPass").value;
+    if (!email || !password) { setMsg("Enter your email and password."); return; }
+    if (password.length < 6) { setMsg("Password must be at least 6 characters."); return; }
+    setMsg("Creating account...");
+    const { data, error } = await sb.auth.signUp({ email, password });
+    if (error) { setMsg(error.message); return; }
+    if (data.session) {
+      await recordLogin(data.user, "signup");
+      showApp();
+    } else {
+      setMsg("Account created. Check your email to confirm, then sign in.");
+    }
+  });
+
+  (async () => {
+    try {
+      const { data } = await sb.auth.getSession();
+      if (data && data.session) {
+        await recordLogin(data.session.user, "app_open");
+        showApp();
+      }
+    } catch (e) { setMsg("Could not check your session."); }
+  })();
+})();
 </script>
 </body>
 </html>
